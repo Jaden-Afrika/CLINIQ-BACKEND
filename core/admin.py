@@ -17,3 +17,10 @@ class SlotAdmin(admin.ModelAdmin):
 class AppointmentAdmin(admin.ModelAdmin):
     list_display = ('id', 'ticket_number', 'patient', 'doctor', 'date', 'status', 'source')
     list_filter = ('doctor', 'date', 'status', 'source')
+
+from .models import Doctor, Slot, Appointment, Profile
+
+@admin.register(Profile)
+class ProfileAdmin(admin.ModelAdmin):
+    list_display = ('id', 'user', 'role', 'phone')
+    list_filter = ('role',)
