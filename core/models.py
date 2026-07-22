@@ -1,8 +1,4 @@
 from django.db import models
-
-# Create your models here.
-
-from django.db import models
 from django.contrib.auth.models import User
 
 
@@ -25,3 +21,31 @@ class Slot(models.Model):
 
     def __str__(self):
         return f"{self.doctor.name} - {self.date} {self.start_time}"
+
+
+class Appointment(models.Model):
+    STATUS_CHOICES = [
+        ('booked', 'Booked'),
+        ('completed', 'Completed'),
+        ('no_show', 'No Show'),
+    ]
+
+    SOURCE_CHOICES = [
+        ('online', 'Online Booking'),
+        ('walk_in', 'Walk-In'),
+    ]
+
+    patient = models.ForeignKey(User, on_delete=models.CASCADE, related_name='appointments')
+    doctor = models.ForeignKey(Doctor, on_delete=models.CASCADE, related_name='appointments')
+    slot = models.ForeignKey(Slot, on_delete=models.SET_NULL, null=True, blank=True, related_name='appointment')
+    date = models.DateField()
+    ticket_number = models.PositiveIntegerField()
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='booked')
+    source = models.CharField(max_length=20, choices=SOURCE_CHOICES, default='online')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['date', 'ticket_number']
+
+    def __str__(self):
+        return f"Ticket #{self.ticket_number} - {self.patient.username} with {self.doctor.name} ({self.date})"
