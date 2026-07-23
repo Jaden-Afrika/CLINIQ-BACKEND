@@ -1,6 +1,8 @@
 from rest_framework import serializers
 from django.contrib.auth.models import User
 from .models import Profile, Doctor, Slot
+from .models import Appointment
+from django.utils import timezone
 
 
 class RegisterSerializer(serializers.ModelSerializer):
@@ -47,3 +49,31 @@ class SlotSerializer(serializers.ModelSerializer):
     class Meta:
         model = Slot
         fields = ('id', 'doctor', 'doctor_name', 'date', 'start_time', 'is_booked')
+
+
+
+
+class BookAppointmentSerializer(serializers.Serializer):
+    slot_id = serializers.IntegerField()
+
+    def validate_slot_id(self, value):
+        try:
+            slot = Slot.objects.get(id=value)
+        except Slot.DoesNotExist:
+            raise serializers.ValidationError("Slot not found.")
+        if slot.is_booked:
+            raise serializers.ValidationError("This slot is already booked.")
+        return value
+
+
+class AppointmentSerializer(serializers.ModelSerializer):
+    doctor_name = serializers.CharField(source='doctor.name', read_only=True)
+    patient_username = serializers.CharField(source='patient.username', read_only=True)
+
+    class Meta:
+        model = Appointment
+        fields = (
+            'id', 'ticket_number', 'doctor', 'doctor_name',
+            'patient', 'patient_username', 'date', 'status', 'source', 'created_at'
+        )
+        read_only_fields = ('id', 'ticket_number', 'patient', 'status', 'created_at')
