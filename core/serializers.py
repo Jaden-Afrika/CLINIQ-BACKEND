@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from django.contrib.auth.models import User
-from .models import Profile
+from .models import Profile, Doctor, Slot
 
 
 class RegisterSerializer(serializers.ModelSerializer):
@@ -31,3 +31,19 @@ class ProfileSerializer(serializers.ModelSerializer):
     class Meta:
         model = Profile
         fields = ('username', 'email', 'role', 'phone')
+
+        from .models import Doctor, Slot
+
+
+class DoctorSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Doctor
+        fields = ('id', 'name', 'specialty')
+
+
+class SlotSerializer(serializers.ModelSerializer):
+    doctor_name = serializers.CharField(source='doctor.name', read_only=True)
+
+    class Meta:
+        model = Slot
+        fields = ('id', 'doctor', 'doctor_name', 'date', 'start_time', 'is_booked')
