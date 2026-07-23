@@ -4,10 +4,11 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from django.shortcuts import get_object_or_404
 from django.db import transaction
+from django.db.models import Count, Q
 from django.utils import timezone
 from .models import Profile, Doctor, Slot, Appointment, Notification, ServiceRating
 from .serializers import (
-    RegisterSerializer, ProfileSerializer, DoctorSerializer, SlotSerializer,
+    RegisterSerializer, ProfileSerializer, AccountSettingsSerializer, DoctorSerializer, SlotSerializer,
     BookAppointmentSerializer, AppointmentSerializer, MyTicketSerializer, NowServingSerializer,
     AdminAppointmentSerializer, UpdateStatusSerializer, AdminRequestSerializer,
     ReviewAdminRequestSerializer, NotificationSerializer,
@@ -61,6 +62,34 @@ class MeView(APIView):
     def get(self, request):
         profile = Profile.objects.get(user=request.user)
         return Response(ProfileSerializer(profile).data)
+
+
+class AccountSettingsView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        return Response(AccountSettingsSerializer(request.user.profile).data)
+
+    def patch(self, request):
+        serializer = AccountSettingsSerializer(request.user.profile, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        return Response(AccountSettingsSerializer(serializer.save()).data)
+
+
+class PatientDashboardView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        today = timezone.localdate()
+        appointments = Appointment.objects.filter(patient=request.user).select_related('doctor')
+        active = appointments.filter(date=today, status='booked').order_by('ticket_number').first()
+        upcoming = appointments.filter(date__gte=today, status='booked').order_by('date', 'ticket_number')[:5]
+        history = appointments.filter(status__in=['completed', 'no_show']).order_by('-date', '-ticket_number')[:5]
+        return Response({
+            'active_ticket': MyTicketSerializer(active).data if active else None,
+            'upcoming': AppointmentSerializer(upcoming, many=True).data,
+            'history': AppointmentSerializer(history, many=True).data,
+        })
 
 
 class NotificationListView(generics.ListAPIView):
@@ -134,10 +163,37 @@ class AdminRequestDetailView(APIView):
         })
 
 
+class SuperAdminDashboardView(APIView):
+    permission_classes = [IsSuperAdmin]
+
+    def get(self, request):
+        today = timezone.localdate()
+        return Response({
+            'pending_accounts': Profile.objects.filter(role__in=['staff', 'doctor'], is_approved=False, approval_status='pending').count(),
+            'today_appointments': Appointment.objects.filter(date=today).count(),
+            'active_doctors': Doctor.objects.filter(user__profile__is_approved=True).count(),
+            'today_booked': Appointment.objects.filter(date=today, status='booked').count(),
+        })
+
+
 class DoctorListView(generics.ListAPIView):
-    queryset = Doctor.objects.all()
     serializer_class = DoctorSerializer
     permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        return Doctor.objects.annotate(
+            available_slots=Count('slots', filter=Q(slots__is_booked=False, slots__date__gte=timezone.localdate()))
+        ).order_by('name')
+
+
+class DoctorDetailView(generics.RetrieveAPIView):
+    serializer_class = DoctorSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        return Doctor.objects.annotate(
+            available_slots=Count('slots', filter=Q(slots__is_booked=False, slots__date__gte=timezone.localdate()))
+        )
 
 
 class SlotListView(generics.ListAPIView):
@@ -186,7 +242,7 @@ class BookAppointmentView(APIView):
             slot.is_booked = True
             slot.save()
 
-            if slot.doctor.user_id:
+            if slot.doctor.user_id and slot.doctor.user.profile.notifications_enabled:
                 Notification.objects.create(
                     user=slot.doctor.user,
                     appointment=appointment,
@@ -361,11 +417,12 @@ class AdminNextView(APIView):
         appointment.status = 'completed'
         appointment.save()
 
-        Notification.objects.create(
-            user=appointment.patient,
-            appointment=appointment,
-            message=f"Your visit with Dr {doctor.name} has been completed.",
-        )
+        if appointment.patient.profile.notifications_enabled:
+            Notification.objects.create(
+                user=appointment.patient,
+                appointment=appointment,
+                message=f"Your visit with Dr {doctor.name} has been completed.",
+            )
 
         return Response(AdminAppointmentSerializer(appointment).data)
 
@@ -397,10 +454,11 @@ class AdminUpdateStatusView(APIView):
                 f"You missed your visit with Dr {appointment.doctor.name}. "
                 "Please book another appointment if needed."
             )
-        Notification.objects.create(
-            user=appointment.patient,
-            appointment=appointment,
-            message=message,
-        )
+        if appointment.patient.profile.notifications_enabled:
+            Notification.objects.create(
+                user=appointment.patient,
+                appointment=appointment,
+                message=message,
+            )
 
         return Response(AdminAppointmentSerializer(appointment).data)

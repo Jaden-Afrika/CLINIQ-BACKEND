@@ -13,6 +13,8 @@ class Doctor(models.Model):
     )
     name = models.CharField(max_length=255)
     specialty = models.CharField(max_length=255, blank=True)
+    bio = models.TextField(blank=True)
+    photo_url = models.URLField(blank=True)
 
     def __str__(self):
         return self.name
@@ -76,6 +78,7 @@ class Profile(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='profile')
     role = models.CharField(max_length=20, choices=ROLE_CHOICES, default='patient')
     phone = models.CharField(max_length=20, blank=True)
+    notifications_enabled = models.BooleanField(default=True)
     is_approved = models.BooleanField(default=True)
     approval_status = models.CharField(
         max_length=20,

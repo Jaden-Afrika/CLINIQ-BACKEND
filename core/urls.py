@@ -1,13 +1,13 @@
 from django.urls import path
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 from .views import (
-    RegisterView, MeView, DoctorListView, SlotListView,
+    RegisterView, MeView, AccountSettingsView, PatientDashboardView, DoctorListView, DoctorDetailView, SlotListView,
     BookAppointmentView, MyTicketView, NowServingView,
     AdminTodayQueueView, AdminNextView, AdminUpdateStatusView,
     AdminRequestListView, AdminRequestDetailView,
     NotificationListView, NotificationUnreadCountView, NotificationMarkReadView,
     DoctorScheduledAppointmentsView, DoctorFreeSlotsView, DoctorDashboardView,
-    DoctorDiagnosisView, PatientServiceRatingView,
+    DoctorDiagnosisView, PatientServiceRatingView, SuperAdminDashboardView,
 )
 
 urlpatterns = [
@@ -15,12 +15,16 @@ urlpatterns = [
     path('auth/login/', TokenObtainPairView.as_view(), name='login'),
     path('auth/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
     path('auth/me/', MeView.as_view(), name='me'),
+    path('auth/settings/', AccountSettingsView.as_view(), name='account-settings'),
+    path('dashboard/patient/', PatientDashboardView.as_view(), name='patient-dashboard'),
     path('notifications/', NotificationListView.as_view(), name='notification-list'),
     path('notifications/unread-count/', NotificationUnreadCountView.as_view(), name='notification-unread-count'),
     path('notifications/<int:notification_id>/read/', NotificationMarkReadView.as_view(), name='notification-mark-read'),
     path('auth/admin-requests/', AdminRequestListView.as_view(), name='admin-request-list'),
     path('auth/admin-requests/<int:user_id>/', AdminRequestDetailView.as_view(), name='admin-request-detail'),
+    path('auth/super-admin-dashboard/', SuperAdminDashboardView.as_view(), name='super-admin-dashboard'),
     path('doctors/', DoctorListView.as_view(), name='doctor-list'),
+    path('doctors/<int:pk>/', DoctorDetailView.as_view(), name='doctor-detail'),
     path('slots/', SlotListView.as_view(), name='slot-list'),
     path('appointments/book/', BookAppointmentView.as_view(), name='book-appointment'),
     path('appointments/my-ticket/', MyTicketView.as_view(), name='my-ticket'),

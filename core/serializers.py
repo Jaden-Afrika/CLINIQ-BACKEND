@@ -1,5 +1,7 @@
 from rest_framework import serializers
 from django.contrib.auth.models import User
+from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.utils import timezone
 from .models import Profile, Doctor, Slot, Appointment, Notification, ServiceRating
 
@@ -19,6 +21,11 @@ class RegisterSerializer(serializers.ModelSerializer):
     def validate(self, attrs):
         if attrs.get('role') == 'doctor' and not attrs.get('doctor_name'):
             raise serializers.ValidationError({'doctor_name': 'This field is required for doctors.'})
+        try:
+            # Runs AUTH_PASSWORD_VALIDATORS (min length, common password, similarity, etc.)
+            validate_password(attrs.get('password'))
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError({'password': list(exc.messages)})
         return attrs
 
     def create(self, validated_data):
@@ -43,6 +50,16 @@ class RegisterSerializer(serializers.ModelSerializer):
             Doctor.objects.create(user=user, name=doctor_name, specialty=specialty)
         return user
 
+    def to_representation(self, instance):
+        # `role` isn't an attribute on User, so the base implementation falls back
+        # to the ChoiceField's default ('patient') instead of the submitted value.
+        # Pull the real, persisted role from the Profile that create() just made.
+        ret = super().to_representation(instance)
+        profile = getattr(instance, 'profile', None)
+        if profile is not None:
+            ret['role'] = profile.role
+        return ret
+
 
 class ProfileSerializer(serializers.ModelSerializer):
     id = serializers.IntegerField(source='user.id', read_only=True)
@@ -52,6 +69,46 @@ class ProfileSerializer(serializers.ModelSerializer):
     class Meta:
         model = Profile
         fields = ('id', 'username', 'email', 'role', 'phone', 'is_approved')
+
+
+class AccountSettingsSerializer(serializers.ModelSerializer):
+    username = serializers.CharField(source='user.username', read_only=True)
+    email = serializers.EmailField(source='user.email', required=False, allow_blank=True)
+    current_password = serializers.CharField(write_only=True, required=False)
+    new_password = serializers.CharField(write_only=True, required=False)
+
+    class Meta:
+        model = Profile
+        fields = ('username', 'email', 'phone', 'notifications_enabled', 'current_password', 'new_password')
+
+    def validate(self, attrs):
+        current_password = attrs.get('current_password')
+        new_password = attrs.get('new_password')
+        if bool(current_password) != bool(new_password):
+            raise serializers.ValidationError('Provide both current_password and new_password to change your password.')
+        if new_password:
+            if not self.instance.user.check_password(current_password):
+                raise serializers.ValidationError({'current_password': 'Current password is incorrect.'})
+            try:
+                validate_password(new_password, self.instance.user)
+            except DjangoValidationError as exc:
+                raise serializers.ValidationError({'new_password': list(exc.messages)})
+        return attrs
+
+    def update(self, instance, validated_data):
+        user_data = validated_data.pop('user', {})
+        validated_data.pop('current_password', None)
+        new_password = validated_data.pop('new_password', None)
+        instance.phone = validated_data.get('phone', instance.phone)
+        instance.notifications_enabled = validated_data.get('notifications_enabled', instance.notifications_enabled)
+        instance.save(update_fields=['phone', 'notifications_enabled'])
+        if 'email' in user_data:
+            instance.user.email = user_data['email']
+        if new_password:
+            instance.user.set_password(new_password)
+        if user_data or new_password:
+            instance.user.save()
+        return instance
 
 
 class AdminRequestSerializer(serializers.ModelSerializer):
@@ -78,9 +135,10 @@ class NotificationSerializer(serializers.ModelSerializer):
 
 
 class DoctorSerializer(serializers.ModelSerializer):
+    available_slots = serializers.IntegerField(read_only=True)
     class Meta:
         model = Doctor
-        fields = ('id', 'name', 'specialty')
+        fields = ('id', 'name', 'specialty', 'bio', 'photo_url', 'available_slots')
 
 
 class SlotSerializer(serializers.ModelSerializer):

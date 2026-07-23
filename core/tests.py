@@ -89,6 +89,22 @@ class StaffApprovalTests(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
 
+    def test_super_admin_can_log_in_and_retrieve_their_profile(self):
+        self.create_profile('super-admin', 'super_admin')
+
+        login_response = self.client.post(
+            f'{self.api_prefix}/auth/login/',
+            {'username': 'super-admin', 'password': 'strong-password'},
+            format='json',
+        )
+
+        self.assertEqual(login_response.status_code, status.HTTP_200_OK)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {login_response.data['access']}")
+        me_response = self.client.get(f'{self.api_prefix}/auth/me/')
+
+        self.assertEqual(me_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(me_response.data['role'], 'super_admin')
+
     def test_non_super_admin_cannot_review_requests(self):
         user, _ = self.create_profile('staff', 'staff')
         self.client.force_authenticate(user=user)
