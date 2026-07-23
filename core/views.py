@@ -4,7 +4,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from django.db import transaction
 from django.utils import timezone
-from .models import Profile, Doctor, Slot, Appointment
+from .models import Profile, Doctor, Slot, Appointment, Notification
 from .serializers import (
     RegisterSerializer, ProfileSerializer, DoctorSerializer, SlotSerializer,
     BookAppointmentSerializer, AppointmentSerializer, MyTicketSerializer, NowServingSerializer,
@@ -170,6 +170,11 @@ class AdminNextView(APIView):
         appointment.status = 'completed'
         appointment.save()
 
+        Notification.objects.create(
+            appointment=appointment,
+            message=f"Your visit with {doctor.name} has been completed."
+        )
+
         return Response(AdminAppointmentSerializer(appointment).data)
 
 
@@ -186,7 +191,14 @@ class AdminUpdateStatusView(APIView):
         except Appointment.DoesNotExist:
             return Response({"detail": "Appointment not found."}, status=status.HTTP_404_NOT_FOUND)
 
-        appointment.status = serializer.validated_data['status']
+        new_status = serializer.validated_data['status']
+        appointment.status = new_status
         appointment.save()
+
+        if new_status == 'completed':
+            message = f"Your visit with {appointment.doctor.name} has been completed."
+        else:
+            message = f"You were marked as a no-show for your appointment with {appointment.doctor.name}."
+        Notification.objects.create(appointment=appointment, message=message)
 
         return Response(AdminAppointmentSerializer(appointment).data)

@@ -1,6 +1,6 @@
 from django.contrib import admin
 from .models import Doctor, Slot, Appointment
-
+from .models import Doctor, Slot, Appointment, Profile, Notification
 
 @admin.register(Doctor)
 class DoctorAdmin(admin.ModelAdmin):
@@ -24,3 +24,8 @@ from .models import Doctor, Slot, Appointment, Profile
 class ProfileAdmin(admin.ModelAdmin):
     list_display = ('id', 'user', 'role', 'phone')
     list_filter = ('role',)
+
+@admin.register(Notification)
+class NotificationAdmin(admin.ModelAdmin):
+    list_display = ('id', 'appointment', 'message', 'created_at', 'is_read')
+    list_filter = ('is_read',)
