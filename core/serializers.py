@@ -1,8 +1,7 @@
 from rest_framework import serializers
 from django.contrib.auth.models import User
-from .models import Profile, Doctor, Slot
-from .models import Appointment
 from django.utils import timezone
+from .models import Profile, Doctor, Slot, Appointment
 
 
 class RegisterSerializer(serializers.ModelSerializer):
@@ -34,8 +33,6 @@ class ProfileSerializer(serializers.ModelSerializer):
         model = Profile
         fields = ('username', 'email', 'role', 'phone')
 
-        from .models import Doctor, Slot
-
 
 class DoctorSerializer(serializers.ModelSerializer):
     class Meta:
@@ -49,8 +46,6 @@ class SlotSerializer(serializers.ModelSerializer):
     class Meta:
         model = Slot
         fields = ('id', 'doctor', 'doctor_name', 'date', 'start_time', 'is_booked')
-
-
 
 
 class BookAppointmentSerializer(serializers.Serializer):
@@ -77,3 +72,24 @@ class AppointmentSerializer(serializers.ModelSerializer):
             'patient', 'patient_username', 'date', 'status', 'source', 'created_at'
         )
         read_only_fields = ('id', 'ticket_number', 'patient', 'status', 'created_at')
+
+
+class NowServingSerializer(serializers.Serializer):
+    doctor_id = serializers.IntegerField()
+    doctor_name = serializers.CharField()
+    now_serving = serializers.IntegerField()
+
+
+class MyTicketSerializer(serializers.ModelSerializer):
+    doctor_name = serializers.CharField(source='doctor.name', read_only=True)
+    now_serving = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Appointment
+        fields = ('id', 'ticket_number', 'doctor', 'doctor_name', 'date', 'status', 'now_serving')
+
+    def get_now_serving(self, obj):
+        served_count = Appointment.objects.filter(
+            doctor=obj.doctor, date=obj.date, status__in=['completed', 'no_show']
+        ).count()
+        return served_count + 1
