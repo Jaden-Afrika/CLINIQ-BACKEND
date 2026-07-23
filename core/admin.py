@@ -22,8 +22,9 @@ from .models import Doctor, Slot, Appointment, Profile
 
 @admin.register(Profile)
 class ProfileAdmin(admin.ModelAdmin):
-    list_display = ('id', 'user', 'role', 'phone')
-    list_filter = ('role',)
+    list_display = ('id', 'user', 'role', 'phone', 'is_approved', 'approval_status')
+    list_filter = ('role', 'is_approved', 'approval_status')
+    search_fields = ('user__username', 'phone')
 
 @admin.register(Notification)
 class NotificationAdmin(admin.ModelAdmin):
