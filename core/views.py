@@ -7,8 +7,19 @@ from django.utils import timezone
 from .models import Profile, Doctor, Slot, Appointment
 from .serializers import (
     RegisterSerializer, ProfileSerializer, DoctorSerializer, SlotSerializer,
-    BookAppointmentSerializer, AppointmentSerializer, MyTicketSerializer, NowServingSerializer
+    BookAppointmentSerializer, AppointmentSerializer, MyTicketSerializer, NowServingSerializer,
+    AdminAppointmentSerializer, UpdateStatusSerializer
 )
+
+
+class IsStaffAdmin(permissions.BasePermission):
+    def has_permission(self, request, view):
+        if not request.user.is_authenticated:
+            return False
+        try:
+            return request.user.profile.role == 'staff'
+        except Profile.DoesNotExist:
+            return False
 
 
 class RegisterView(generics.CreateAPIView):
@@ -114,3 +125,68 @@ class NowServingView(APIView):
             "now_serving": served_count + 1,
         }
         return Response(NowServingSerializer(data).data)
+
+
+class AdminTodayQueueView(generics.ListAPIView):
+    """Staff-only: list today's appointments for a doctor, ordered by ticket number."""
+    serializer_class = AdminAppointmentSerializer
+    permission_classes = [IsStaffAdmin]
+
+    def get_queryset(self):
+        today = timezone.localdate()
+        queryset = Appointment.objects.filter(date=today)
+        doctor_id = self.request.query_params.get('doctor')
+        if doctor_id:
+            queryset = queryset.filter(doctor_id=doctor_id)
+        return queryset.order_by('ticket_number')
+
+
+class AdminNextView(APIView):
+    """Staff-only: advance the queue by marking the current 'now serving' ticket completed."""
+    permission_classes = [IsStaffAdmin]
+
+    def post(self, request, doctor_id):
+        today = timezone.localdate()
+        try:
+            doctor = Doctor.objects.get(id=doctor_id)
+        except Doctor.DoesNotExist:
+            return Response({"detail": "Doctor not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        served_count = Appointment.objects.filter(
+            doctor=doctor, date=today, status__in=['completed', 'no_show']
+        ).count()
+        current_ticket_number = served_count + 1
+
+        appointment = Appointment.objects.filter(
+            doctor=doctor, date=today, ticket_number=current_ticket_number, status='booked'
+        ).first()
+
+        if not appointment:
+            return Response(
+                {"detail": "No booked appointment at the current ticket number."},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        appointment.status = 'completed'
+        appointment.save()
+
+        return Response(AdminAppointmentSerializer(appointment).data)
+
+
+class AdminUpdateStatusView(APIView):
+    """Staff-only: mark a specific appointment completed or no_show directly."""
+    permission_classes = [IsStaffAdmin]
+
+    def patch(self, request, appointment_id):
+        serializer = UpdateStatusSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        try:
+            appointment = Appointment.objects.get(id=appointment_id)
+        except Appointment.DoesNotExist:
+            return Response({"detail": "Appointment not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        appointment.status = serializer.validated_data['status']
+        appointment.save()
+
+        return Response(AdminAppointmentSerializer(appointment).data)

@@ -93,3 +93,19 @@ class MyTicketSerializer(serializers.ModelSerializer):
             doctor=obj.doctor, date=obj.date, status__in=['completed', 'no_show']
         ).count()
         return served_count + 1
+
+
+class AdminAppointmentSerializer(serializers.ModelSerializer):
+    doctor_name = serializers.CharField(source='doctor.name', read_only=True)
+    patient_username = serializers.CharField(source='patient.username', read_only=True)
+
+    class Meta:
+        model = Appointment
+        fields = (
+            'id', 'ticket_number', 'doctor', 'doctor_name',
+            'patient', 'patient_username', 'date', 'status', 'source', 'created_at'
+        )
+
+
+class UpdateStatusSerializer(serializers.Serializer):
+    status = serializers.ChoiceField(choices=['completed', 'no_show'])
