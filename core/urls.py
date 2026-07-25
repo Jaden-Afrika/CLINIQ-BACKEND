@@ -1,13 +1,14 @@
 from django.urls import path
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 from .views import (
-    RegisterView, MeView, AccountSettingsView, PatientDashboardView, DoctorListView, DoctorDetailView, SlotListView,
+    RegisterView, MeView, AccountSettingsView, PatientDashboardView, DoctorListView, DoctorSpecialtyListView, DoctorDetailView, SlotListView,
     BookAppointmentView, MyTicketView, NowServingView,
     AdminTodayQueueView, AdminNextView, AdminUpdateStatusView,
     AdminRequestListView, AdminRequestDetailView,
     NotificationListView, NotificationUnreadCountView, NotificationMarkReadView,
     DoctorScheduledAppointmentsView, DoctorFreeSlotsView, DoctorDashboardView,
-    DoctorDiagnosisView, PatientServiceRatingView, SuperAdminDashboardView,
+    DoctorDiagnosisView, DoctorTreatmentView, PatientServiceRatingView, SuperAdminDashboardView,
+    AdminAppointmentListView, AdminWalkInAppointmentView,
 )
 
 urlpatterns = [
@@ -24,6 +25,7 @@ urlpatterns = [
     path('auth/admin-requests/<int:user_id>/', AdminRequestDetailView.as_view(), name='admin-request-detail'),
     path('auth/super-admin-dashboard/', SuperAdminDashboardView.as_view(), name='super-admin-dashboard'),
     path('doctors/', DoctorListView.as_view(), name='doctor-list'),
+    path('doctors/specialties/', DoctorSpecialtyListView.as_view(), name='doctor-specialty-list'),
     path('doctors/<int:pk>/', DoctorDetailView.as_view(), name='doctor-detail'),
     path('slots/', SlotListView.as_view(), name='slot-list'),
     path('appointments/book/', BookAppointmentView.as_view(), name='book-appointment'),
@@ -34,7 +36,10 @@ urlpatterns = [
     path('doctor/free-slots/', DoctorFreeSlotsView.as_view(), name='doctor-free-slots'),
     path('doctor/dashboard/', DoctorDashboardView.as_view(), name='doctor-dashboard'),
     path('doctor/appointments/<int:appointment_id>/diagnosis/', DoctorDiagnosisView.as_view(), name='doctor-diagnosis'),
+    path('doctor/appointments/<int:appointment_id>/treatment/', DoctorTreatmentView.as_view(), name='doctor-treatment'),
     path('admin/queue/', AdminTodayQueueView.as_view(), name='admin-queue'),
+    path('admin/appointments/', AdminAppointmentListView.as_view(), name='admin-appointment-list'),
+    path('admin/walk-ins/', AdminWalkInAppointmentView.as_view(), name='admin-walk-in'),
     path('admin/doctors/<int:doctor_id>/next/', AdminNextView.as_view(), name='admin-next'),
     path('admin/appointments/<int:appointment_id>/status/', AdminUpdateStatusView.as_view(), name='admin-update-status'),
 ]

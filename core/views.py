@@ -4,7 +4,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from django.shortcuts import get_object_or_404
 from django.db import transaction
-from django.db.models import Count, Q
+from django.db.models import Count, Max, Q
 from django.utils import timezone
 from .models import Profile, Doctor, Slot, Appointment, Notification, ServiceRating
 from .serializers import (
@@ -13,6 +13,7 @@ from .serializers import (
     AdminAppointmentSerializer, UpdateStatusSerializer, AdminRequestSerializer,
     ReviewAdminRequestSerializer, NotificationSerializer,
     DiagnosisSerializer, DoctorAppointmentSerializer, ServiceRatingSerializer,
+    TreatmentSerializer, WalkInAppointmentSerializer,
 )
 
 
@@ -181,9 +182,36 @@ class DoctorListView(generics.ListAPIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-        return Doctor.objects.annotate(
+        queryset = Doctor.objects.annotate(
             available_slots=Count('slots', filter=Q(slots__is_booked=False, slots__date__gte=timezone.localdate()))
-        ).order_by('name')
+        )
+        specialty = self.request.query_params.get('specialty')
+        if specialty:
+            queryset = queryset.filter(specialty__iexact=specialty)
+        return queryset.order_by('name')
+
+
+class DoctorSpecialtyListView(APIView):
+    """List specialties that currently have at least one bookable doctor."""
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        doctors = Doctor.objects.exclude(specialty='').annotate(
+            available_slots=Count(
+                'slots',
+                filter=Q(slots__is_booked=False, slots__date__gte=timezone.localdate()),
+            )
+        ).filter(available_slots__gt=0)
+
+        specialties = {}
+        for doctor in doctors:
+            entry = specialties.setdefault(
+                doctor.specialty,
+                {'specialty': doctor.specialty, 'doctor_count': 0, 'available_slots': 0},
+            )
+            entry['doctor_count'] += 1
+            entry['available_slots'] += doctor.available_slots
+        return Response(sorted(specialties.values(), key=lambda item: item['specialty'].lower()))
 
 
 class DoctorDetailView(generics.RetrieveAPIView):
@@ -201,7 +229,10 @@ class SlotListView(generics.ListAPIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-        queryset = Slot.objects.filter(is_booked=False)
+        queryset = Slot.objects.filter(
+            is_booked=False,
+            date__gte=timezone.localdate(),
+        )
         doctor_id = self.request.query_params.get('doctor')
         if doctor_id:
             queryset = queryset.filter(doctor_id=doctor_id)
@@ -324,6 +355,31 @@ class DoctorDiagnosisView(APIView):
         return Response(DoctorAppointmentSerializer(appointment).data)
 
 
+class DoctorTreatmentView(APIView):
+    """Record treatment and finish an appointment from the doctor's portal."""
+    permission_classes = [IsDoctor]
+
+    def patch(self, request, appointment_id):
+        serializer = TreatmentSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        appointment = get_object_or_404(
+            Appointment,
+            id=appointment_id,
+            doctor__user=request.user,
+            status__in=['booked', 'completed'],
+        )
+        appointment.treatment = serializer.validated_data['treatment']
+        if 'diagnosis' in serializer.validated_data:
+            appointment.diagnosis = serializer.validated_data['diagnosis']
+        if appointment.status != 'completed':
+            appointment.status = 'completed'
+            appointment.completed_at = timezone.now()
+        elif appointment.completed_at is None:
+            appointment.completed_at = timezone.now()
+        appointment.save(update_fields=['treatment', 'diagnosis', 'status', 'completed_at'])
+        return Response(DoctorAppointmentSerializer(appointment).data)
+
+
 class PatientServiceRatingView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
@@ -388,6 +444,56 @@ class AdminTodayQueueView(generics.ListAPIView):
         return queryset.order_by('ticket_number')
 
 
+class AdminAppointmentListView(generics.ListAPIView):
+    """Staff-only complete appointment record, with optional filters."""
+    serializer_class = AdminAppointmentSerializer
+    permission_classes = [IsStaffAdmin]
+
+    def get_queryset(self):
+        queryset = Appointment.objects.select_related('doctor', 'patient', 'slot')
+        for field in ('doctor', 'status', 'source', 'date'):
+            value = self.request.query_params.get(field)
+            if value:
+                queryset = queryset.filter(**{field: value})
+        return queryset.order_by('-date', '-created_at')
+
+
+class AdminWalkInAppointmentView(APIView):
+    """Staff-only check-in for a patient arriving without an online booking."""
+    permission_classes = [IsStaffAdmin]
+
+    def post(self, request):
+        serializer = WalkInAppointmentSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        patient = serializer.validated_data['patient']
+        doctor = serializer.validated_data['doctor']
+        appointment_date = serializer.validated_data.get('date', timezone.localdate())
+
+        with transaction.atomic():
+            # Lock the doctor record so concurrent check-ins receive distinct tickets.
+            Doctor.objects.select_for_update().get(id=doctor.id)
+            last_ticket = Appointment.objects.filter(
+                doctor=doctor,
+                date=appointment_date,
+            ).aggregate(last=Max('ticket_number'))['last'] or 0
+            appointment = Appointment.objects.create(
+                patient=patient,
+                doctor=doctor,
+                date=appointment_date,
+                ticket_number=last_ticket + 1,
+                source='walk_in',
+                status='booked',
+            )
+
+        if doctor.user_id and doctor.user.profile.notifications_enabled:
+            Notification.objects.create(
+                user=doctor.user,
+                appointment=appointment,
+                message=f"Walk-in patient {patient.username} joined your queue.",
+            )
+        return Response(AdminAppointmentSerializer(appointment).data, status=status.HTTP_201_CREATED)
+
+
 class AdminNextView(APIView):
     """Staff-only: advance the queue by marking the current 'now serving' ticket completed."""
     permission_classes = [IsStaffAdmin]
@@ -415,7 +521,8 @@ class AdminNextView(APIView):
             )
 
         appointment.status = 'completed'
-        appointment.save()
+        appointment.completed_at = timezone.now()
+        appointment.save(update_fields=['status', 'completed_at'])
 
         if appointment.patient.profile.notifications_enabled:
             Notification.objects.create(
@@ -445,7 +552,11 @@ class AdminUpdateStatusView(APIView):
             return Response(AdminAppointmentSerializer(appointment).data)
 
         appointment.status = new_status
-        appointment.save()
+        update_fields = ['status']
+        if new_status == 'completed':
+            appointment.completed_at = timezone.now()
+            update_fields.append('completed_at')
+        appointment.save(update_fields=update_fields)
 
         if new_status == 'completed':
             message = f"Your visit with Dr {appointment.doctor.name} has been completed."

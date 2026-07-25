@@ -199,12 +199,14 @@ class MyTicketSerializer(serializers.ModelSerializer):
 class AdminAppointmentSerializer(serializers.ModelSerializer):
     doctor_name = serializers.CharField(source='doctor.name', read_only=True)
     patient_username = serializers.CharField(source='patient.username', read_only=True)
+    scheduled_time = serializers.TimeField(source='slot.start_time', read_only=True, allow_null=True)
 
     class Meta:
         model = Appointment
         fields = (
             'id', 'ticket_number', 'doctor', 'doctor_name',
-            'patient', 'patient_username', 'date', 'status', 'source', 'created_at'
+            'patient', 'patient_username', 'date', 'scheduled_time', 'status', 'source',
+            'diagnosis', 'treatment', 'created_at', 'completed_at',
         )
 
 
@@ -214,6 +216,41 @@ class UpdateStatusSerializer(serializers.Serializer):
 
 class DiagnosisSerializer(serializers.Serializer):
     diagnosis = serializers.CharField(allow_blank=True)
+
+
+class TreatmentSerializer(serializers.Serializer):
+    treatment = serializers.CharField(allow_blank=False)
+    diagnosis = serializers.CharField(required=False, allow_blank=True)
+
+
+class WalkInAppointmentSerializer(serializers.Serializer):
+    username = serializers.CharField(write_only=True)
+    password = serializers.CharField(required=False, write_only=True)
+    phone = serializers.CharField(required=False, allow_blank=True)
+
+    doctor_id = serializers.PrimaryKeyRelatedField(
+        queryset=Doctor.objects.all(), source='doctor'
+    )
+    date = serializers.DateField(required=False)
+
+    def validate(self, attrs):
+        username = attrs.pop('username')
+        password = attrs.pop('password', None) or '12345678'
+        phone = attrs.pop('phone', '')
+
+        try:
+            user = User.objects.get(username=username)
+            try:
+                if user.profile.role != 'patient':
+                    raise serializers.ValidationError({'username': 'Existing account is not a patient.'})
+            except Profile.DoesNotExist:
+                raise serializers.ValidationError({'username': 'Existing account has no profile.'})
+        except User.DoesNotExist:
+            user = User.objects.create_user(username=username, password=password)
+            Profile.objects.create(user=user, role='patient', phone=phone)
+
+        attrs['patient'] = user
+        return attrs
 
 
 class ServiceRatingSerializer(serializers.ModelSerializer):
@@ -233,5 +270,5 @@ class DoctorAppointmentSerializer(serializers.ModelSerializer):
         model = Appointment
         fields = (
             'id', 'ticket_number', 'patient', 'patient_username', 'date', 'status',
-            'source', 'diagnosis', 'created_at', 'rating',
+            'source', 'diagnosis', 'treatment', 'created_at', 'completed_at', 'rating',
         )

@@ -1,9 +1,27 @@
+from io import StringIO
+
 from django.contrib.auth.models import User
+from django.core.management import call_command
+from django.test import TestCase
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APITestCase
 
 from .models import Appointment, Doctor, Notification, Profile, ServiceRating, Slot
+
+
+class SeedDemoCommandTests(TestCase):
+    def test_seed_demo_creates_five_dentistry_and_five_other_doctors(self):
+        out = StringIO()
+
+        call_command('seed_demo', stdout=out)
+
+        dentistry_doctors = Doctor.objects.filter(specialty='Dentistry')
+        other_doctors = Doctor.objects.exclude(specialty='Dentistry')
+
+        self.assertGreaterEqual(dentistry_doctors.count(), 5)
+        self.assertGreaterEqual(other_doctors.count(), 5)
+        self.assertTrue(all(doctor.user is not None for doctor in Doctor.objects.all()))
 
 
 class StaffApprovalTests(APITestCase):
@@ -323,3 +341,110 @@ class DoctorPortalTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertEqual(ServiceRating.objects.get(appointment=appointment).rating, 5)
         self.assertEqual(duplicate_response.status_code, status.HTTP_400_BAD_REQUEST)
+
+
+class WalkInAndTreatmentTests(APITestCase):
+    api_prefix = '/api'
+
+    def setUp(self):
+        self.staff = User.objects.create_user(username='staff', password='strong-password')
+        Profile.objects.create(user=self.staff, role='staff', is_approved=True)
+        self.doctor_user = User.objects.create_user(username='doctor', password='strong-password')
+        Profile.objects.create(user=self.doctor_user, role='doctor', is_approved=True)
+        self.doctor = Doctor.objects.create(
+            user=self.doctor_user,
+            name='Grace Hopper',
+            specialty='General',
+        )
+        self.patient = User.objects.create_user(username='walk-in-patient', password='strong-password')
+        Profile.objects.create(user=self.patient, role='patient')
+
+    def test_staff_can_check_in_a_walk_in_and_doctor_can_record_treatment(self):
+        self.client.force_authenticate(user=self.staff)
+        check_in_response = self.client.post(
+            f'{self.api_prefix}/admin/walk-ins/',
+            {'username': self.patient.username, 'doctor_id': self.doctor.id},
+            format='json',
+        )
+
+        self.assertEqual(check_in_response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(check_in_response.data['source'], 'walk_in')
+        self.assertEqual(check_in_response.data['ticket_number'], 1)
+
+        appointment_id = check_in_response.data['id']
+        self.client.force_authenticate(user=self.doctor_user)
+        treatment_response = self.client.patch(
+            f'{self.api_prefix}/doctor/appointments/{appointment_id}/treatment/',
+            {'diagnosis': 'Seasonal allergy', 'treatment': 'Prescribed antihistamine.'},
+            format='json',
+        )
+
+        self.assertEqual(treatment_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(treatment_response.data['status'], 'completed')
+        self.assertEqual(treatment_response.data['treatment'], 'Prescribed antihistamine.')
+        self.assertIsNotNone(treatment_response.data['completed_at'])
+
+        self.client.force_authenticate(user=self.staff)
+        records_response = self.client.get(
+            f'{self.api_prefix}/admin/appointments/?source=walk_in'
+        )
+        self.assertEqual(records_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(records_response.data[0]['id'], appointment_id)
+        self.assertEqual(records_response.data[0]['treatment'], 'Prescribed antihistamine.')
+
+    def test_staff_can_check_in_existing_patient_by_username(self):
+        self.client.force_authenticate(user=self.staff)
+        response = self.client.post(
+            f'{self.api_prefix}/admin/walk-ins/',
+            {'username': self.patient.username, 'doctor_id': self.doctor.id},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data['source'], 'walk_in')
+        self.assertEqual(response.data['patient'], self.patient.id)
+
+    def test_staff_can_create_new_patient_for_walk_in_by_username(self):
+        self.client.force_authenticate(user=self.staff)
+        response = self.client.post(
+            f'{self.api_prefix}/admin/walk-ins/',
+            {'username': 'new_walk_in', 'doctor_id': self.doctor.id, 'phone': '0700123456'},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data['source'], 'walk_in')
+        self.assertEqual(response.data['doctor'], self.doctor.id)
+
+        # New user should be created as patient
+        new_user = User.objects.get(username='new_walk_in')
+        self.assertEqual(new_user.profile.role, 'patient')
+        self.assertEqual(new_user.profile.phone, '0700123456')
+
+
+class DoctorSpecialtyTests(APITestCase):
+    api_prefix = '/api'
+
+    def setUp(self):
+        self.patient = User.objects.create_user(username='patient', password='strong-password')
+        Profile.objects.create(user=self.patient, role='patient')
+        self.dentist = Doctor.objects.create(name='Dentist', specialty='Dentistry')
+        self.general = Doctor.objects.create(name='General Doctor', specialty='General Practice')
+        Slot.objects.create(doctor=self.dentist, date=timezone.localdate(), start_time='09:00')
+        Slot.objects.create(doctor=self.general, date=timezone.localdate(), start_time='10:00')
+
+    def test_patient_can_list_specialties_and_filter_doctors_by_specialty(self):
+        self.client.force_authenticate(user=self.patient)
+
+        specialties_response = self.client.get(f'{self.api_prefix}/doctors/specialties/')
+        doctors_response = self.client.get(
+            f'{self.api_prefix}/doctors/?specialty=Dentistry'
+        )
+
+        self.assertEqual(specialties_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            [item['specialty'] for item in specialties_response.data],
+            ['Dentistry', 'General Practice'],
+        )
+        self.assertEqual(doctors_response.status_code, status.HTTP_200_OK)
+        self.assertEqual([item['name'] for item in doctors_response.data], ['Dentist'])

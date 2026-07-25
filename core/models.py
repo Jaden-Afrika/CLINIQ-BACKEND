@@ -53,7 +53,9 @@ class Appointment(models.Model):
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='booked')
     source = models.CharField(max_length=20, choices=SOURCE_CHOICES, default='online')
     diagnosis = models.TextField(blank=True)
+    treatment = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering = ['date', 'ticket_number']
