@@ -192,7 +192,12 @@ class DoctorListView(generics.ListAPIView):
 
 
 class DoctorSpecialtyListView(APIView):
-    """List specialties that currently have at least one bookable doctor."""
+    """List every specialty that has at least one doctor.
+
+    ``available_slots`` is included per specialty so the frontend can show
+    "no openings right now" for a genre, but a specialty is never hidden
+    just because its doctors are temporarily fully booked.
+    """
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
@@ -201,7 +206,7 @@ class DoctorSpecialtyListView(APIView):
                 'slots',
                 filter=Q(slots__is_booked=False, slots__date__gte=timezone.localdate()),
             )
-        ).filter(available_slots__gt=0)
+        )
 
         specialties = {}
         for doctor in doctors:

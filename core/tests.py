@@ -1,3 +1,4 @@
+from datetime import timedelta
 from io import StringIO
 
 from django.contrib.auth.models import User
@@ -448,3 +449,25 @@ class DoctorSpecialtyTests(APITestCase):
         )
         self.assertEqual(doctors_response.status_code, status.HTTP_200_OK)
         self.assertEqual([item['name'] for item in doctors_response.data], ['Dentist'])
+
+    def test_specialty_still_lists_when_no_future_slots_are_open(self):
+        # A doctor whose slots are all in the past, or all booked, should
+        # still show up as a genre on the booking page - patients just see
+        # zero available_slots for it instead of the type disappearing.
+        Doctor.objects.all().delete()
+        fully_booked = Doctor.objects.create(name='Fully Booked Doc', specialty='Physical Therapy')
+        Slot.objects.create(
+            doctor=fully_booked,
+            date=timezone.localdate() - timedelta(days=1),
+            start_time='09:00',
+        )
+
+        self.client.force_authenticate(user=self.patient)
+        response = self.client.get(f'{self.api_prefix}/doctors/specialties/')
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            [item['specialty'] for item in response.data],
+            ['Physical Therapy'],
+        )
+        self.assertEqual(response.data[0]['available_slots'], 0)
