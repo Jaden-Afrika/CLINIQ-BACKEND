@@ -15,6 +15,53 @@ class Command(BaseCommand):
         base = ''.join(ch for ch in base if ch.isalnum() or ch == '_')
         return base or 'doctor'
 
+    def _realistic_names_for_specialty(self, specialty):
+        specialty_names = {
+            'General Practice': ['Dr. Amara Okafor', 'Dr. Kevin Kibet', 'Dr. Nancy Muthoni'],
+            'Pediatrics': ['Dr. Wanjiru Kamau', 'Dr. Sarah Njeri', 'Dr. Peter Kibet'],
+            'Cardiology': ['Dr. Daniel Mwangi', 'Dr. Grace Wanjiru', 'Dr. Peter Kiplagat'],
+            'Dermatology': ['Dr. Leah Otieno', 'Dr. Joan Wambui', 'Dr. Brian Mugo'],
+            'Gynecology': ['Dr. Grace Kiptoo', 'Dr. Hellen Akinyi', 'Dr. Faith Mumo'],
+            'Dentistry': ['Dr. Otieno Ochieng', 'Dr. Amina Yusuf', 'Dr. Brian Njoroge', 'Dr. Kelvin Mutua', 'Dr. Esther Kimani'],
+            'Dentist': ['Dr. Alice Mwangi', 'Dr. Brian Otieno', 'Dr. Catherine Njoroge', 'Dr. Daniel Kariuki'],
+            'General Medicine': ['Dr. Jaden Afrika', 'Dr. Rare Tryph', 'Dr. Kayla Omollo', 'Dr. Triple G'],
+            'Physical Therapy': ['Dr. Omollo Opil', 'Dr. Rose Wairimu', 'Dr. Martin Muriithi'],
+            'Neurology': ['Dr. Mercy Wambui', 'Dr. Isaac Chege', 'Dr. Ann Wanjiku'],
+        }
+        return specialty_names.get(specialty, ['Dr. Alice Mwangi', 'Dr. Brian Otieno', 'Dr. Catherine Njoroge', 'Dr. Daniel Kariuki'])
+
+    def _get_unique_realistic_name(self, specialty, used_names=None):
+        used_names = set(used_names or [])
+        for candidate in self._realistic_names_for_specialty(specialty):
+            if candidate not in used_names:
+                used_names.add(candidate)
+                return candidate
+
+        first_names = ['Alice', 'Brian', 'Catherine', 'Daniel', 'Esther', 'Faith', 'Grace', 'Henry', 'Irene', 'John']
+        last_names = ['Mwangi', 'Njoroge', 'Otieno', 'Kiptoo', 'Kariuki', 'Wambui', 'Wanjiku', 'Kibet', 'Mugo', 'Muriithi']
+        counter = 0
+        while True:
+            candidate = f"Dr. {first_names[counter % len(first_names)]} {last_names[(counter // len(first_names)) % len(last_names)]}"
+            if candidate not in used_names:
+                used_names.add(candidate)
+                return candidate
+            counter += 1
+
+    def _looks_like_placeholder_name(self, name):
+        lowered = (name or '').lower()
+        return any(token in lowered for token in ['extra', 'specialist', 'placeholder', 'cardiologist'])
+
+    def _placeholder_replacement_name(self, name):
+        replacements = {
+            'dr afrika': 'Dr. Asha Mugo',
+            'jaden afrika': 'Dr. Jaden Waweru',
+            'rare tryph': 'Dr. Ruth Nyambura',
+            'kayla omollo': 'Dr. Kayla Njeri',
+            'triple g': 'Dr. Titus Gachanja',
+            'omollo opil': 'Dr. Paul Omondi',
+        }
+        return replacements.get((name or '').strip().lower())
+
     def handle(self, *args, **options):
         today = timezone.localdate()
 
@@ -43,12 +90,28 @@ class Command(BaseCommand):
         existing_specialties = set(Doctor.objects.exclude(specialty='').values_list('specialty', flat=True))
         specialties = list(seed_specialties | existing_specialties)
 
+        existing_names = set(Doctor.objects.exclude(name='').values_list('name', flat=True))
+        for doctor in Doctor.objects.all():
+            replacement_name = self._placeholder_replacement_name(doctor.name)
+            if replacement_name:
+                if replacement_name not in existing_names:
+                    doctor.name = replacement_name
+                    doctor.save(update_fields=['name'])
+                    existing_names.add(replacement_name)
+                continue
+
+            if self._looks_like_placeholder_name(doctor.name):
+                new_name = self._get_unique_realistic_name(doctor.specialty or 'General Practice', existing_names - {doctor.name})
+                doctor.name = new_name
+                doctor.save(update_fields=['name'])
+                existing_names.add(new_name)
+
         for specialty in specialties:
             count = Doctor.objects.filter(specialty=specialty).count()
             needed = max(0, 5 - count)
-            for i in range(needed):
-                # Create clearly named doctors to fill the specialty
-                name = f"Dr. {specialty} Extra {i+1}"
+            for _ in range(needed):
+                name = self._get_unique_realistic_name(specialty, existing_names)
+                existing_names.add(name)
                 doctor, created = Doctor.objects.get_or_create(name=name, defaults={"specialty": specialty})
                 if created:
                     self.stdout.write(f"Created doctor to fill specialty {specialty}: {doctor.name}")
