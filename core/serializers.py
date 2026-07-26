@@ -8,35 +8,54 @@ from .models import Profile, Doctor, Slot, Appointment, Notification, ServiceRat
 
 class RegisterSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, min_length=6)
+    username = serializers.CharField(required=False, allow_blank=True, max_length=150)
     # Super-admin accounts are provisioned server-side only.
     role = serializers.ChoiceField(choices=['patient', 'staff', 'doctor'], default='patient')
     phone = serializers.CharField(required=False, allow_blank=True)
     doctor_name = serializers.CharField(required=False, max_length=255)
     specialty = serializers.CharField(required=False, allow_blank=True, max_length=255)
+    full_name = serializers.CharField(required=False, allow_blank=True, max_length=255)
 
     class Meta:
         model = User
-        fields = ('username', 'email', 'password', 'role', 'phone', 'doctor_name', 'specialty')
+        fields = ('username', 'email', 'password', 'role', 'phone', 'doctor_name', 'specialty', 'full_name')
 
     def validate(self, attrs):
         if attrs.get('role') == 'doctor' and not attrs.get('doctor_name'):
             raise serializers.ValidationError({'doctor_name': 'This field is required for doctors.'})
         try:
-            # Runs AUTH_PASSWORD_VALIDATORS (min length, common password, similarity, etc.)
             validate_password(attrs.get('password'))
         except DjangoValidationError as exc:
             raise serializers.ValidationError({'password': list(exc.messages)})
         return attrs
+
+    def _make_username(self, full_name, email, role):
+        if role == 'patient' and full_name:
+            base = full_name.strip().lower().replace('.', '').replace(' ', '_')
+            base = ''.join(ch for ch in base if ch.isalnum() or ch == '_') or 'patient'
+            username = base
+            counter = 1
+            while User.objects.filter(username=username).exists():
+                username = f'{base}_{counter}'
+                counter += 1
+            return username
+        if email:
+            return email.split('@', 1)[0].lower().replace('.', '_').replace('-', '_')
+        return 'patient'
 
     def create(self, validated_data):
         role = validated_data.pop('role', 'patient')
         phone = validated_data.pop('phone', '')
         doctor_name = validated_data.pop('doctor_name', '')
         specialty = validated_data.pop('specialty', '')
+        full_name = validated_data.pop('full_name', '')
+        email = validated_data.get('email', '')
+        username = validated_data.get('username') or self._make_username(full_name, email, role)
         user = User.objects.create_user(
-            username=validated_data['username'],
-            email=validated_data.get('email', ''),
+            username=username,
+            email=email,
             password=validated_data['password'],
+            first_name=full_name or validated_data.get('username', ''),
         )
         is_approved = role == 'patient'
         Profile.objects.create(
@@ -51,13 +70,11 @@ class RegisterSerializer(serializers.ModelSerializer):
         return user
 
     def to_representation(self, instance):
-        # `role` isn't an attribute on User, so the base implementation falls back
-        # to the ChoiceField's default ('patient') instead of the submitted value.
-        # Pull the real, persisted role from the Profile that create() just made.
         ret = super().to_representation(instance)
         profile = getattr(instance, 'profile', None)
         if profile is not None:
             ret['role'] = profile.role
+        ret['full_name'] = instance.get_full_name() or instance.username
         return ret
 
 
@@ -65,10 +82,14 @@ class ProfileSerializer(serializers.ModelSerializer):
     id = serializers.IntegerField(source='user.id', read_only=True)
     username = serializers.CharField(source='user.username', read_only=True)
     email = serializers.CharField(source='user.email', read_only=True)
+    full_name = serializers.SerializerMethodField()
 
     class Meta:
         model = Profile
-        fields = ('id', 'username', 'email', 'role', 'phone', 'is_approved')
+        fields = ('id', 'username', 'email', 'full_name', 'role', 'phone', 'is_approved')
+
+    def get_full_name(self, obj):
+        return obj.user.get_full_name() or obj.user.username
 
 
 class AccountSettingsSerializer(serializers.ModelSerializer):

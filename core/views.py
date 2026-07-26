@@ -1,7 +1,9 @@
+from django.contrib.auth.models import User
 from django.shortcuts import render
 from rest_framework import generics, permissions, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from rest_framework_simplejwt.views import TokenObtainPairView
 from django.shortcuts import get_object_or_404
 from django.db import transaction
 from django.db.models import Count, Max, Q
@@ -55,6 +57,20 @@ class IsDoctor(permissions.BasePermission):
 class RegisterView(generics.CreateAPIView):
     permission_classes = [permissions.AllowAny]
     serializer_class = RegisterSerializer
+
+
+class EmailTokenObtainPairView(TokenObtainPairView):
+    def post(self, request, *args, **kwargs):
+        email = request.data.get('email')
+        if email and 'username' not in request.data:
+            user = None
+            try:
+                user = User.objects.get(email__iexact=email)
+            except User.DoesNotExist:
+                pass
+            if user is not None:
+                request.data['username'] = user.username
+        return super().post(request, *args, **kwargs)
 
 
 class MeView(APIView):

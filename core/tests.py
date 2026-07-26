@@ -61,6 +61,42 @@ class StaffApprovalTests(APITestCase):
         self.assertTrue(profile.is_approved)
         self.assertEqual(profile.approval_status, 'approved')
 
+    def test_patient_registration_accepts_full_name_and_generates_username(self):
+        response = self.client.post(
+            f'{self.api_prefix}/auth/register/',
+            {
+                'full_name': 'Mr. John Mwangi',
+                'email': 'john.mwangi@example.com',
+                'password': 'strong-password',
+                'role': 'patient',
+                'phone': '0700000000',
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data['full_name'], 'Mr. John Mwangi')
+        user = User.objects.get(email='john.mwangi@example.com')
+        self.assertEqual(user.first_name, 'Mr. John Mwangi')
+        self.assertTrue(user.username.startswith('mr_john_mwangi'))
+
+    def test_login_accepts_email_instead_of_username(self):
+        User.objects.create_user(
+            username='johnmwangi',
+            email='john.mwangi@example.com',
+            password='strong-password',
+            first_name='Mr. John Mwangi',
+        )
+
+        response = self.client.post(
+            f'{self.api_prefix}/auth/login/',
+            {'email': 'john.mwangi@example.com', 'password': 'strong-password'},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn('access', response.data)
+
     def test_public_registration_rejects_super_admin(self):
         response = self.register('not-a-super-admin', 'super_admin')
 
