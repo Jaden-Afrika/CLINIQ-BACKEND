@@ -97,6 +97,22 @@ class StaffApprovalTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertIn('access', response.data)
 
+    def test_login_accepts_email_sent_in_the_frontend_username_field(self):
+        User.objects.create_user(
+            username='janewanjiku',
+            email='jane.wanjiku@example.com',
+            password='strong-password',
+        )
+
+        response = self.client.post(
+            f'{self.api_prefix}/auth/login/',
+            {'username': 'jane.wanjiku@example.com', 'password': 'strong-password'},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn('access', response.data)
+
     def test_public_registration_rejects_super_admin(self):
         response = self.register('not-a-super-admin', 'super_admin')
 

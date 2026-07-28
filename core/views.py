@@ -61,15 +61,19 @@ class RegisterView(generics.CreateAPIView):
 
 class EmailTokenObtainPairView(TokenObtainPairView):
     def post(self, request, *args, **kwargs):
-        email = request.data.get('email')
-        if email and 'username' not in request.data:
-            user = None
+        # The web client has one "Email or username" field and sends its
+        # value as ``username``.  Translate it when it matches an account
+        # email, while preserving regular username sign-in.
+        identifier = request.data.get('email') or request.data.get('username')
+        if identifier:
             try:
-                user = User.objects.get(email__iexact=email)
+                user = User.objects.get(email__iexact=identifier)
             except User.DoesNotExist:
-                pass
+                user = None
             if user is not None:
-                request.data['username'] = user.username
+                data = request.data.copy()
+                data['username'] = user.username
+                request._full_data = data
         return super().post(request, *args, **kwargs)
 
 
